@@ -41,8 +41,6 @@ object Driver {
 
     // deleteOutputDir(config)
 
-    val louvain = new Louvain()
-    louvain.run(sc, config)
-
+    val louvain = new Louvain(sc)
   }
 }

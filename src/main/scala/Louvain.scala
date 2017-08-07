@@ -5,7 +5,8 @@ import org.apache.spark.rdd.RDD
 
 import scala.reflect.ClassTag
 
-class Louvain() extends Serializable{
+class Louvain(@transient val sc: SparkContext) extends Serializable {
+
   def getEdgeRDD(sc: SparkContext, conf: LouvainConfig, typeConversionMethod: String => Long = _.toLong): RDD[Edge[Long]] = {
     sc.textFile(conf.inputFile, conf.parallelism).map(row => {
       val tokens = row.split(conf.delimiter).map(_.trim())
@@ -369,9 +370,7 @@ class Louvain() extends Serializable{
   }
 
   //def run[VD: ClassTag](sc: SparkContext, config: LouvainConfig, graph: Graph[VD, Long]): Unit = {
-  def run[VD: ClassTag](sc: SparkContext, config: LouvainConfig): Graph[LouvainData, VertexId] = {
-    val edgeRDD = getEdgeRDD(sc, config)
-    val initialGraph = Graph.fromEdges(edgeRDD, None)
+  def run[VD: ClassTag](initialGraph: Graph[VD, Long], minimumCompressionProgress: Int, progressCounter: Int): Graph[LouvainData, VertexId] = {
     var louvainGraph = createLouvainGraph(initialGraph)
 
     var compressionLevel = -1 // number of times the graph has been compressed
@@ -386,7 +385,7 @@ class Louvain() extends Serializable{
 
       // label each vertex with its best community choice at this level of compression
       val (currentQModularityValue, currentGraph, numberOfPasses) =
-        louvain(sc, louvainGraph, config.minimumCompressionProgress, config.progressCounter)
+        louvain(sc, louvainGraph, minimumCompressionProgress, progressCounter)
 
       louvainGraph.unpersistVertices(blocking = false)
       louvainGraph = currentGraph
