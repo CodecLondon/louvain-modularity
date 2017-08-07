@@ -1,16 +1,9 @@
-import scala.reflect.ClassTag
-
-import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.serializers.DefaultArraySerializers.ObjectArraySerializer
-import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
-
-import org.apache.spark._
+import org.apache.spark.SparkContext
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.SparkContext._
-import org.apache.spark.graphx._
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.{Logging, SparkContext}
+
+import scala.reflect.ClassTag
 
 class Louvain() extends Serializable{
   def getEdgeRDD(sc: SparkContext, conf: LouvainConfig, typeConversionMethod: String => Long = _.toLong): RDD[Edge[Long]] = {
@@ -375,26 +368,8 @@ class Louvain() extends Serializable{
     louvainGraph
   }
 
-  def saveLevel(
-    sc: SparkContext,
-    config: LouvainConfig,
-    level: Int,
-    qValues: Array[(Int, Double)],
-    graph: Graph[LouvainData, Long]) = {
-
-    val vertexSavePath = config.outputDir + "/level_" + level + "_vertices"
-    val edgeSavePath = config.outputDir + "/level_" + level + "_edges"
-
-    // save
-    graph.vertices.saveAsTextFile(vertexSavePath)
-    graph.edges.saveAsTextFile(edgeSavePath)
-
-    // overwrite the q values at each level
-    sc.parallelize(qValues, 1).saveAsTextFile(config.outputDir + "/qvalues_" + level)
-  }
-
   //def run[VD: ClassTag](sc: SparkContext, config: LouvainConfig, graph: Graph[VD, Long]): Unit = {
-  def run[VD: ClassTag](sc: SparkContext, config: LouvainConfig): Unit = {
+  def run[VD: ClassTag](sc: SparkContext, config: LouvainConfig): Graph[LouvainData, VertexId] = {
     val edgeRDD = getEdgeRDD(sc, config)
     val initialGraph = Graph.fromEdges(edgeRDD, None)
     var louvainGraph = createLouvainGraph(initialGraph)
@@ -420,8 +395,6 @@ class Louvain() extends Serializable{
 
       qValues = qValues :+ ((compressionLevel, currentQModularityValue))
 
-      saveLevel(sc, config, compressionLevel, qValues, louvainGraph)
-
       // If modularity was increased by at least 0.001 compress the graph and repeat
       // halt immediately if the community labeling took less than 3 passes
       //println(s"if ($passes > 2 && $currentQ > $q + 0.001 )")
@@ -434,8 +407,9 @@ class Louvain() extends Serializable{
       }
 
     } while (!halt)
-      //finalSave(sc, compressionLevel, q_modularityValue, louvainGraph)
 
-
+    louvainGraph
   }
+
+
 }
