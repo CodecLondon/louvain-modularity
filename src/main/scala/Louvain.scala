@@ -3,6 +3,7 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.graphx._
 import org.apache.spark.rdd.RDD
 
+import scala.collection.mutable
 import scala.reflect.ClassTag
 
 class Louvain(@transient val sc: SparkContext) extends Serializable {
@@ -369,8 +370,10 @@ class Louvain(@transient val sc: SparkContext) extends Serializable {
     louvainGraph
   }
 
-  //def run[VD: ClassTag](sc: SparkContext, config: LouvainConfig, graph: Graph[VD, Long]): Unit = {
-  def run[VD: ClassTag](initialGraph: Graph[VD, Long], minimumCompressionProgress: Int, progressCounter: Int): Graph[LouvainData, VertexId] = {
+  /**
+   * @return graph of [CommunityId, EdgeCount]
+   */
+  def run[VD: ClassTag](initialGraph: Graph[VD, Long], minimumCompressionProgress: Int, progressCounter: Int): Graph[Long, Long] = {
     var louvainGraph = createLouvainGraph(initialGraph)
 
     var compressionLevel = -1 // number of times the graph has been compressed
@@ -378,6 +381,7 @@ class Louvain(@transient val sc: SparkContext) extends Serializable {
     var halt = false
 
     var qValues: Array[(Int, Double)] = Array()
+    val levels = mutable.Buffer[RDD[(Long, Long)]]()
 
     do {
       compressionLevel += 1
@@ -389,6 +393,7 @@ class Louvain(@transient val sc: SparkContext) extends Serializable {
 
       louvainGraph.unpersistVertices(blocking = false)
       louvainGraph = currentGraph
+      levels.append(currentGraph.vertices.mapValues(_.community))
 
       println(s"qValue: $currentQModularityValue")
 
@@ -407,8 +412,21 @@ class Louvain(@transient val sc: SparkContext) extends Serializable {
 
     } while (!halt)
 
-    louvainGraph
+    val communities = levels.reverse.reduce((c, o) => revert(o, c))
+    val finalGraph = initialGraph.outerJoinVertices(communities)((vid, vd, communityIdOpt) => communityIdOpt.get) // every node should have community
+
+    finalGraph
   }
 
+
+  def revert(original: RDD[(VertexId, Long)], compressed: RDD[(VertexId, Long)]): RDD[(VertexId, Long)] = {
+    val invertedCommunityIdxOriginal: RDD[(Long, VertexId)] = original.map(_.swap)
+
+    // notice that all nodes of the compressed RDD are communities, So their vertex id is the original's community id
+    invertedCommunityIdxOriginal.join(compressed).map {
+      case (oldCommunityId, (originalVertexId, compressedCommunityId)) =>
+        (originalVertexId, compressedCommunityId)
+    }
+  }
 
 }
